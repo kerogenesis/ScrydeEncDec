@@ -1,0 +1,33 @@
+[package]
+name = "scryde_encdec"
+version = "1.0.0"
+edition = "2024"
+authors = ["kerogenesys"]
+description = "Scryde Gamekit Data encrypter & decrypter"
+
+[dependencies]
+flate2 = { version = "1.1", features = ["zlib"] }
+blowfish = "0.10"
+crc32fast = "1"
+cipher = { version = "0.5", features = ["block-padding"] }
+byteorder = "1.5"
+num-bigint = "0.4"
+num-traits = "0.2"
+indicatif = "0.17"
+crossterm = "0.28"
+rayon = "1.10"
+thiserror = "2"
+walkdir = "2"
+camino = "1"
+obfstr = "0.4"
+
+[build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false

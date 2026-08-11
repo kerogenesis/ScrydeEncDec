@@ -1,0 +1,49 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust x86 MSVC target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-pc-windows-msvc
+
+      - name: Build Release Binary
+        shell: cmd
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static -C link-arg=/DEBUG:NONE --remap-path-prefix %=~"
+        run: cargo build --release --target i686-pc-windows-msvc
+
+      - name: Sign Binary
+        shell: powershell
+        run: |
+          . .\res\sign\Invoke-LazySign.ps1
+          Invoke-LazySign -Target "target\i686-pc-windows-msvc\release\scryde_encdec.exe" -Domain "twitter.com" -Password "kyprivet999"
+
+      - name: Package Binary to ZIP
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zipName = "ScrydeEncDec_${tag}.zip"
+          Compress-Archive -Path "target\i686-pc-windows-msvc\release\scryde_encdec.exe" -DestinationPath $zipName
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+
+      - name: Upload GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
