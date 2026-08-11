@@ -2,16 +2,17 @@
   <img src="res/cover.png" alt="ScrydeEncDec" width="100%">
 </p>
 
-<p align="center">
+<p align="left">
   <img src="https://img.shields.io/badge/language-Rust-orange">
   <img src="https://img.shields.io/badge/platform-Windows%20x86-0078d4">
-  <img src="https://github.com/kerogenesis/ScrydeEncDec/actions/workflows/release.yml/badge.svg?branch=main">
+  <img src="https://github.com/kerogenesis/ScrydeEncDec/actions/workflows/release.yml/badge.svg">
   <img src="https://img.shields.io/badge/license-MIT-blue">
-  <img src="https://img.shields.io/github/v/release/kerogenesis/ScrydeEncDec">
-
+  <a href="https://github.com/kerogenesis/ScrydeEncDec/releases/download/v1.0.0/ScrydeEncDec_v1.0.0.zip"><img src="https://img.shields.io/github/v/release/kerogenesis/ScrydeEncDec"></a>
 </p>
 
-Scryde seems to be continuing their fight against a well-known Eblanova company. That's why a little joke was added to the client :D
+Soo!  
+Scryde [seems to be continuing their fight](https://habr.com/en/articles/1051494/) against a well-known Eblanova company.  
+That's why a little joke was added to the client. Good luck to them (nah) :D
 
 ## Features
 - The app works in the same way as the well-known mxencdec.
