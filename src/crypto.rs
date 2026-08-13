@@ -6,12 +6,18 @@ use flate2::write::ZlibEncoder;
 use num_bigint::BigUint;
 use std::io::{Read, Write};
 
-pub const HEADER_413_FULL: &[u8; 28] = b"G\0a\0m\0e\0k\0i\0t\0D\0a\0t\0a\04\01\03\0";
-pub const HEADER_111_FULL: &[u8; 28] = b"G\0a\0m\0e\0k\0i\0t\0D\0a\0t\0a\01\01\01\0";
-pub const HEADER_120_FULL: &[u8; 28] = b"G\0a\0m\0e\0k\0i\0t\0D\0a\0t\0a\01\02\00\0";
-pub const HEADER_121_FULL: &[u8; 28] = b"G\0a\0m\0e\0k\0i\0t\0D\0a\0t\0a\01\02\01\0";
-pub const HEADER_211_FULL: &[u8; 28] = b"G\0a\0m\0e\0k\0i\0t\0D\0a\0t\0a\02\01\01\0";
-pub const HEADER_212_FULL: &[u8; 28] = b"G\0a\0m\0e\0k\0i\0t\0D\0a\0t\0a\02\01\02\0";
+pub const HEADER_413_FULL: &[u8; 28] =
+    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x004\x001\x003\x00";
+pub const HEADER_111_FULL: &[u8; 28] =
+    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x001\x001\x001\x00";
+pub const HEADER_120_FULL: &[u8; 28] =
+    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x001\x002\x000\x00";
+pub const HEADER_121_FULL: &[u8; 28] =
+    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x001\x002\x001\x00";
+pub const HEADER_211_FULL: &[u8; 28] =
+    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x002\x001\x001\x00";
+pub const HEADER_212_FULL: &[u8; 28] =
+    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x002\x001\x002\x00";
 
 pub const KEY_211: [u8; 8] = [0x1E, 0x52, 0x46, 0xF9, 0x96, 0x10, 0xCD, 0x33];
 pub const KEY_212: [u8; 8] = [0x42, 0xC1, 0x36, 0xE6, 0x6C, 0x1F, 0x68, 0xE6];
@@ -60,10 +66,10 @@ fn transform_bytes(
     }
     let mut out = Vec::with_capacity(total);
     for (i, &b) in payload.iter().enumerate() {
-        if let Some(cb) = on_progress {
-            if i % 8192 == 0 || i == total - 1 {
-                cb(i + 1, total);
-            }
+        if let Some(cb) = on_progress
+            && (i % 8192 == 0 || i == total - 1)
+        {
+            cb(i + 1, total);
         }
         out.push(f(i, b));
     }
@@ -116,6 +122,7 @@ pub fn decrypt_121(
     filename: &str,
     on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Vec<u8> {
+    let is_bmp = filename.to_ascii_lowercase().ends_with(".bmp");
     let found_key = (payload.len() >= 4)
         .then(|| {
             (0..=255u8).find(|&candidate| {
@@ -126,7 +133,7 @@ pub fn decrypt_121(
                 [p0, p1, p2, p3] == MAGIC_121_VTX
                     || [p0, p1, p2, p3] == MAGIC_121_OGG
                     || [p0, p1, p2, p3] == MAGIC_121_L2SD
-                    || (p0 == b'B' && p1 == b'M')
+                    || (is_bmp && p0 == b'B' && p1 == b'M')
             })
         })
         .flatten();
@@ -168,10 +175,9 @@ pub fn encrypt_212(plaintext: &[u8], on_progress: Option<&dyn Fn(usize, usize)>)
     out
 }
 
-fn rsa_modpow(block: &[u8; 128], modulus_bytes: &[u8; 128], exponent: &BigUint) -> [u8; 128] {
+fn rsa_modpow(block: &[u8; 128], modulus: &BigUint, exponent: &BigUint) -> [u8; 128] {
     let base = BigUint::from_bytes_be(block);
-    let modulus = BigUint::from_bytes_le(modulus_bytes);
-    let result = base.modpow(exponent, &modulus);
+    let result = base.modpow(exponent, modulus);
     let res_bytes = result.to_bytes_be();
     let mut out = [0u8; 128];
     if res_bytes.len() <= 128 {
@@ -179,10 +185,6 @@ fn rsa_modpow(block: &[u8; 128], modulus_bytes: &[u8; 128], exponent: &BigUint) 
         out[offset..].copy_from_slice(&res_bytes);
     }
     out
-}
-
-fn rsa_modpow_block(block: &[u8; 128], modulus_bytes: &[u8; 128], exp: u32) -> [u8; 128] {
-    rsa_modpow(block, modulus_bytes, &BigUint::from(exp))
 }
 
 fn align_413_chunk_size(size: usize) -> usize {
@@ -224,7 +226,12 @@ pub fn decrypt_413(payload: &[u8], on_progress: Option<&dyn Fn(usize, usize)>) -
     if payload.len() >= 128 {
         let block_count = payload.len() / 128;
         if block_count > 0 {
-            for &(exp, mod_key) in &[(29u32, &RSA_MODULUS_KEY1), (53u32, &RSA_MODULUS_KEY2)] {
+            let mod1 = BigUint::from_bytes_le(&RSA_MODULUS_KEY1);
+            let mod2 = BigUint::from_bytes_le(&RSA_MODULUS_KEY2);
+            let exp_29 = BigUint::from(29u32);
+            let exp_53 = BigUint::from(53u32);
+
+            for (exp, modulus) in [(&exp_29, &mod1), (&exp_53, &mod2)] {
                 let mut reconstructed_zlib = Vec::with_capacity(block_count * 124);
                 let mut ok = true;
                 for idx in 0..block_count {
@@ -233,7 +240,7 @@ pub fn decrypt_413(payload: &[u8], on_progress: Option<&dyn Fn(usize, usize)>) -
                     }
                     let chunk = &payload[idx * 128..(idx + 1) * 128];
                     let block_arr: &[u8; 128] = chunk.try_into().unwrap();
-                    let decrypted_block = rsa_modpow_block(block_arr, mod_key, exp);
+                    let decrypted_block = rsa_modpow(block_arr, modulus, exp);
                     let chunk_size = u32::from_be_bytes([
                         decrypted_block[0],
                         decrypted_block[1],
@@ -256,10 +263,8 @@ pub fn decrypt_413(payload: &[u8], on_progress: Option<&dyn Fn(usize, usize)>) -
                     };
                     reconstructed_zlib.extend_from_slice(chunk_payload);
                 }
-                if ok {
-                    if let Some(decompressed) = decompress_413_payload(&reconstructed_zlib) {
-                        return Ok(decompressed);
-                    }
+                if ok && let Some(decompressed) = decompress_413_payload(&reconstructed_zlib) {
+                    return Ok(decompressed);
                 }
             }
         }
@@ -280,17 +285,7 @@ pub fn decrypt_413(payload: &[u8], on_progress: Option<&dyn Fn(usize, usize)>) -
                     cipher::BlockCipherDecrypt::decrypt_block(&cipher, &mut block);
                     chunk.copy_from_slice(&block);
                 }
-                let mut decompressor = flate2::Decompress::new(true);
-                let mut decompressed = Vec::new();
-                if decompressor
-                    .decompress_vec(
-                        &decrypted[..],
-                        &mut decompressed,
-                        flate2::FlushDecompress::None,
-                    )
-                    .is_ok()
-                    && !decompressed.is_empty()
-                {
+                if let Some(decompressed) = decompress_413_payload(&decrypted) {
                     return Ok(decompressed);
                 }
             }
@@ -313,6 +308,7 @@ pub fn encrypt_413(
     let total_size = HEADER_413_FULL.len() + 128 * chunk_count + 20;
     let mut out = vec![0u8; total_size];
     out[..HEADER_413_FULL.len()].copy_from_slice(HEADER_413_FULL);
+    let modulus = BigUint::from_bytes_le(&RSA_MODULUS_KEY1);
     let d = BigUint::from_bytes_le(&RSA_PRIVATE_EXPONENT_KEY1);
     for (i, chunk) in stream.chunks(124).enumerate() {
         if let Some(cb) = on_progress {
@@ -328,7 +324,7 @@ pub fn encrypt_413(
             block[4..4 + size].copy_from_slice(chunk);
         }
         block[..4].copy_from_slice(&(size as u32).to_be_bytes());
-        let encrypted = rsa_modpow(&block, &RSA_MODULUS_KEY1, &d);
+        let encrypted = rsa_modpow(&block, &modulus, &d);
         out[HEADER_413_FULL.len() + i * 128..HEADER_413_FULL.len() + (i + 1) * 128]
             .copy_from_slice(&encrypted);
     }
@@ -370,19 +366,61 @@ mod tests {
 
     #[test]
     fn decrypt_121_magic_vtx_and_bm() {
-        for (magic, suffix) in [
-            (MAGIC_121_VTX.as_slice(), "texture"),
-            (b"BM".as_slice(), "bitmap"),
+        for (magic, filename) in [
+            (MAGIC_121_VTX.as_slice(), "texture.utx"),
+            (b"BM".as_slice(), "bitmap.bmp"),
         ] {
             let mut plain = magic.to_vec();
-            plain.extend_from_slice(suffix.as_bytes());
-            let enc = encrypt_121(&plain, "OggS.tar", None);
+            plain.extend_from_slice(b"sample_data");
+            let enc = encrypt_121(&plain, filename, None);
             assert!(enc.starts_with(HEADER_121_FULL));
             assert_eq!(
-                decrypt_121(&enc[28..], "OggS.tar", None).as_slice(),
+                decrypt_121(&enc[28..], filename, None).as_slice(),
                 plain.as_slice()
             );
         }
+    }
+
+    #[test]
+    fn decrypt_121_bm_false_positive_prevention() {
+        let payload = vec![0x10, 0x1F, 0x00, 0x00, 0xAA, 0xBB];
+        let dec_non_bmp = decrypt_121(&payload, "codec.utx", None);
+        let expected_key = key_121_from_filename("codec.utx");
+        let expected_dec: Vec<u8> = payload.iter().map(|b| b ^ expected_key).collect();
+        assert_eq!(dec_non_bmp, expected_dec);
+    }
+
+    #[test]
+    fn decrypt_413_blowfish_fallback() {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        let plain = b"Blowfish 413 fallback test plaintext data!";
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(plain).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(plain.len() as u32).to_le_bytes());
+        stream.extend_from_slice(&compressed);
+
+        while stream.len() % 8 != 0 {
+            stream.push(0);
+        }
+
+        let bf_key = b"Lineage2";
+        let cipher = blowfish::Blowfish::<byteorder::BE>::new_from_slice(bf_key).unwrap();
+        let mut encrypted = stream.clone();
+        for chunk in encrypted.chunks_exact_mut(8) {
+            let mut block = cipher::Block::<blowfish::Blowfish<byteorder::BE>>::default();
+            block.copy_from_slice(chunk);
+            cipher::BlockCipherEncrypt::encrypt_block(&cipher, &mut block);
+            chunk.copy_from_slice(&block);
+        }
+
+        let decrypted = decrypt_413(&encrypted, None).expect("Blowfish 413 fallback failed");
+        assert_eq!(decrypted, plain);
     }
 
     #[test]

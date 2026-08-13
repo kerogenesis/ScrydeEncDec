@@ -12,9 +12,15 @@ impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AppError::Io(err) => write!(f, "{}: {err}", obfstr!("I/O Error")),
-            AppError::InvalidHeader => write!(f, "{}", obfstr!("Invalid or unrecognized file header")),
+            AppError::InvalidHeader => {
+                write!(f, "{}", obfstr!("Invalid or unrecognized file header"))
+            }
             AppError::DecompressionFailed => {
-                write!(f, "{}", obfstr!("Decompression failed - Zlib/Blowfish error"))
+                write!(
+                    f,
+                    "{}",
+                    obfstr!("Decompression failed - Zlib/Blowfish error")
+                )
             }
         }
     }

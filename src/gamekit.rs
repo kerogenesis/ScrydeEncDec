@@ -27,13 +27,13 @@ impl std::fmt::Display for FormatType {
     }
 }
 
-pub const GAMEKIT_HEADER: &[u8; 22] = b"G\0a\0m\0e\0k\0i\0t\0D\0a\0t\0a\0";
-pub const HEADER_VER_111: &[u8; 6] = b"1\01\01\0";
-pub const HEADER_VER_120: &[u8; 6] = b"1\02\00\0";
-pub const HEADER_VER_121: &[u8; 6] = b"1\02\01\0";
-pub const HEADER_VER_211: &[u8; 6] = b"2\01\01\0";
-pub const HEADER_VER_212: &[u8; 6] = b"2\01\02\0";
-pub const HEADER_VER_413: &[u8; 6] = b"4\01\03\0";
+pub const GAMEKIT_HEADER: &[u8; 22] = b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x00";
+pub const HEADER_VER_111: &[u8; 6] = b"1\x001\x001\x00";
+pub const HEADER_VER_120: &[u8; 6] = b"1\x002\x000\x00";
+pub const HEADER_VER_121: &[u8; 6] = b"1\x002\x001\x00";
+pub const HEADER_VER_211: &[u8; 6] = b"2\x001\x001\x00";
+pub const HEADER_VER_212: &[u8; 6] = b"2\x001\x002\x00";
+pub const HEADER_VER_413: &[u8; 6] = b"4\x001\x003\x00";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum FileState {

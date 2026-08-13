@@ -23,9 +23,9 @@ struct ProcessResult {
     operation: String,
 }
 
-fn strip_tool_segments(name: &str) -> String {
-    name.replace(obfstr!("enc."), "")
-        .replace(obfstr!("dec."), "")
+fn strip_tool_segments(name: &str) -> &str {
+    let name = name.strip_prefix(obfstr!("enc.")).unwrap_or(name);
+    name.strip_prefix(obfstr!("dec.")).unwrap_or(name)
 }
 
 fn process_file(file_path: &Utf8Path) -> Result<ProcessResult> {
@@ -43,7 +43,7 @@ fn process_file(file_path: &Utf8Path) -> Result<ProcessResult> {
             let decrypted = match format {
                 FormatType::Ver111 => crypto::decrypt_111(payload, None),
                 FormatType::Ver120 => crypto::decrypt_120(payload, None),
-                FormatType::Ver121 => crypto::decrypt_121(payload, &filename, None),
+                FormatType::Ver121 => crypto::decrypt_121(payload, filename, None),
                 FormatType::Ver211 => crypto::decrypt_211(payload, None),
                 FormatType::Ver212 => crypto::decrypt_212(payload, None),
                 FormatType::Ver413 => crypto::decrypt_413(payload, None)?,
@@ -56,13 +56,13 @@ fn process_file(file_path: &Utf8Path) -> Result<ProcessResult> {
             })
         }
         FileState::DecryptedPlaintext => {
-            let category = classify_file(&filename);
+            let category = classify_file(filename);
             let version =
-                version_hint_from_filename(&filename).unwrap_or_else(|| category.default_format());
+                version_hint_from_filename(filename).unwrap_or_else(|| category.default_format());
             let encrypted = match version {
                 FormatType::Ver111 => crypto::encrypt_111(&data, None),
                 FormatType::Ver120 => crypto::encrypt_120(&data, None),
-                FormatType::Ver121 => crypto::encrypt_121(&data, &filename, None),
+                FormatType::Ver121 => crypto::encrypt_121(&data, filename, None),
                 FormatType::Ver211 => crypto::encrypt_211(&data, None),
                 FormatType::Ver212 => crypto::encrypt_212(&data, None),
                 FormatType::Ver413 => crypto::encrypt_413(&data, None)?,
@@ -79,10 +79,10 @@ fn process_file(file_path: &Utf8Path) -> Result<ProcessResult> {
 
 fn collect_files(arg: &str, files: &mut Vec<Utf8PathBuf>) {
     for entry in WalkDir::new(arg).into_iter().filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() {
-            if let Ok(path) = Utf8PathBuf::from_path_buf(entry.into_path()) {
-                files.push(path);
-            }
+        if entry.file_type().is_file()
+            && let Ok(path) = Utf8PathBuf::from_path_buf(entry.into_path())
+        {
+            files.push(path);
         }
     }
 }
@@ -95,10 +95,10 @@ fn wait_any_key() {
     let _ = io::stdout().flush();
     let _ = crossterm::terminal::enable_raw_mode();
     loop {
-        if let Ok(Event::Key(key_event)) = event::read() {
-            if key_event.kind == KeyEventKind::Press {
-                break;
-            }
+        if let Ok(Event::Key(key_event)) = event::read()
+            && key_event.kind == KeyEventKind::Press
+        {
+            break;
         }
     }
     let _ = crossterm::terminal::disable_raw_mode();
@@ -197,4 +197,21 @@ fn main() {
         total_files.to_string().white().bold()
     );
     wait_any_key();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_tool_segments() {
+        assert_eq!(strip_tool_segments("enc.codec.utx"), "codec.utx");
+        assert_eq!(
+            strip_tool_segments("dec.declaration.utx"),
+            "declaration.utx"
+        );
+        assert_eq!(strip_tool_segments("codec.utx"), "codec.utx");
+        assert_eq!(strip_tool_segments("declaration.utx"), "declaration.utx");
+        assert_eq!(strip_tool_segments("fence_dec.utx"), "fence_dec.utx");
+    }
 }
