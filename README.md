@@ -27,7 +27,7 @@ Just select your files or folders and drag them onto scryde_encdec.exe.
 
 You can use build_release.bat script or run the following commands manually:
 ```sh
-cargo build --release
+cargo build --release --target i686-pc-windows-msvc
 ```
 
 Release file lands in `"target\i686-pc-windows-msvc\release\scryde_encdec.exe"`.
