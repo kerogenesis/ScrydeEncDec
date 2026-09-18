@@ -1,23 +1,16 @@
 use crate::error::{AppError, Result};
+use crate::gamekit::{
+    HEADER_111_FULL, HEADER_120_FULL, HEADER_121_FULL, HEADER_211_FULL, HEADER_212_FULL,
+    HEADER_413_FULL,
+};
 use cipher::KeyInit;
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use num_bigint::BigUint;
+use obfstr::obfstr;
 use std::io::{Read, Write};
-
-pub const HEADER_413_FULL: &[u8; 28] =
-    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x004\x001\x003\x00";
-pub const HEADER_111_FULL: &[u8; 28] =
-    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x001\x001\x001\x00";
-pub const HEADER_120_FULL: &[u8; 28] =
-    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x001\x002\x000\x00";
-pub const HEADER_121_FULL: &[u8; 28] =
-    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x001\x002\x001\x00";
-pub const HEADER_211_FULL: &[u8; 28] =
-    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x002\x001\x001\x00";
-pub const HEADER_212_FULL: &[u8; 28] =
-    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x002\x001\x002\x00";
+use std::sync::LazyLock;
 
 pub const KEY_211: [u8; 8] = [0x1E, 0x52, 0x46, 0xF9, 0x96, 0x10, 0xCD, 0x33];
 pub const KEY_212: [u8; 8] = [0x42, 0xC1, 0x36, 0xE6, 0x6C, 0x1F, 0x68, 0xE6];
@@ -54,6 +47,17 @@ pub const RSA_PRIVATE_EXPONENT_KEY1: [u8; 128] = [
     0x4c, 0x50, 0x5b, 0x40, 0xc4, 0xe6, 0xd3, 0x38, 0x78, 0x1d, 0x29, 0x00, 0xe4, 0x76, 0x97, 0x71,
     0x1e, 0x84, 0x8e, 0x3c, 0x06, 0x75, 0x5c, 0x14, 0x86, 0x70, 0xd4, 0x98, 0xd7, 0xc2, 0xb4, 0x30,
 ];
+
+static MODULUS_KEY1: LazyLock<BigUint> =
+    LazyLock::new(|| BigUint::from_bytes_le(&RSA_MODULUS_KEY1));
+static MODULUS_KEY2: LazyLock<BigUint> =
+    LazyLock::new(|| BigUint::from_bytes_le(&RSA_MODULUS_KEY2));
+static EXPONENT_29: LazyLock<BigUint> = LazyLock::new(|| BigUint::from(29u32));
+static EXPONENT_53: LazyLock<BigUint> = LazyLock::new(|| BigUint::from(53u32));
+static PRIVATE_MODULUS_KEY1: LazyLock<BigUint> =
+    LazyLock::new(|| BigUint::from_bytes_le(&RSA_MODULUS_KEY1));
+static PRIVATE_EXPONENT_KEY1: LazyLock<BigUint> =
+    LazyLock::new(|| BigUint::from_bytes_le(&RSA_PRIVATE_EXPONENT_KEY1));
 
 fn transform_bytes(
     payload: &[u8],
@@ -219,77 +223,77 @@ fn decompress_413_payload(reconstructed_zlib: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
+fn try_rsa_key(
+    payload: &[u8],
+    block_count: usize,
+    exponent: &BigUint,
+    modulus: &BigUint,
+    on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Option<Vec<u8>> {
+    let mut reconstructed_zlib = Vec::with_capacity(block_count * 124);
+    for idx in 0..block_count {
+        if let Some(cb) = on_progress {
+            cb(idx + 1, block_count);
+        }
+        let chunk = payload.get(idx * 128..(idx + 1) * 128)?;
+        let block_arr: &[u8; 128] = chunk.try_into().ok()?;
+        let decrypted_block = rsa_modpow(block_arr, modulus, exponent);
+        let chunk_size = u32::from_be_bytes([
+            decrypted_block[0],
+            decrypted_block[1],
+            decrypted_block[2],
+            decrypted_block[3],
+        ]) as usize;
+        let is_last = idx == block_count - 1;
+        if (!is_last && chunk_size != 124) || chunk_size > 124 {
+            return None;
+        }
+        if chunk_size == 0 {
+            continue;
+        }
+        let chunk_payload = decoded_413_chunk_payload(&decrypted_block, chunk_size)?;
+        reconstructed_zlib.extend_from_slice(chunk_payload);
+    }
+    decompress_413_payload(&reconstructed_zlib)
+}
+
+fn try_blowfish_key(payload: &[u8], bf_key: &[u8]) -> Option<Vec<u8>> {
+    let aligned_len = payload.len() - (payload.len() % 8);
+    if aligned_len < 8 {
+        return None;
+    }
+    let cipher = blowfish::Blowfish::<byteorder::BE>::new_from_slice(bf_key).ok()?;
+    let mut decrypted = payload[..aligned_len].to_vec();
+    for chunk in decrypted.as_chunks_mut::<8>().0 {
+        let mut block = cipher::Block::<blowfish::Blowfish<byteorder::BE>>::default();
+        block.copy_from_slice(chunk);
+        cipher::BlockCipherDecrypt::decrypt_block(&cipher, &mut block);
+        chunk.copy_from_slice(&block);
+    }
+    decompress_413_payload(&decrypted)
+}
+
 pub fn decrypt_413(payload: &[u8], on_progress: Option<&dyn Fn(usize, usize)>) -> Result<Vec<u8>> {
     if payload.is_empty() {
         return Err(AppError::InvalidHeader);
     }
     if payload.len() >= 128 {
         let block_count = payload.len() / 128;
-        if block_count > 0 {
-            let mod1 = BigUint::from_bytes_le(&RSA_MODULUS_KEY1);
-            let mod2 = BigUint::from_bytes_le(&RSA_MODULUS_KEY2);
-            let exp_29 = BigUint::from(29u32);
-            let exp_53 = BigUint::from(53u32);
-
-            for (exp, modulus) in [(&exp_29, &mod1), (&exp_53, &mod2)] {
-                let mut reconstructed_zlib = Vec::with_capacity(block_count * 124);
-                let mut ok = true;
-                for idx in 0..block_count {
-                    if let Some(cb) = on_progress {
-                        cb(idx + 1, block_count);
-                    }
-                    let chunk = &payload[idx * 128..(idx + 1) * 128];
-                    let block_arr: &[u8; 128] = chunk.try_into().unwrap();
-                    let decrypted_block = rsa_modpow(block_arr, modulus, exp);
-                    let chunk_size = u32::from_be_bytes([
-                        decrypted_block[0],
-                        decrypted_block[1],
-                        decrypted_block[2],
-                        decrypted_block[3],
-                    ]) as usize;
-                    let is_last = idx == block_count - 1;
-                    if (!is_last && chunk_size != 124) || chunk_size > 124 {
-                        ok = false;
-                        break;
-                    }
-                    if chunk_size == 0 {
-                        continue;
-                    }
-                    let Some(chunk_payload) =
-                        decoded_413_chunk_payload(&decrypted_block, chunk_size)
-                    else {
-                        ok = false;
-                        break;
-                    };
-                    reconstructed_zlib.extend_from_slice(chunk_payload);
-                }
-                if ok && let Some(decompressed) = decompress_413_payload(&reconstructed_zlib) {
-                    return Ok(decompressed);
-                }
+        for (exponent, modulus) in [(&EXPONENT_29, &MODULUS_KEY1), (&EXPONENT_53, &MODULUS_KEY2)] {
+            if let Some(decompressed) =
+                try_rsa_key(payload, block_count, exponent, modulus, on_progress)
+            {
+                return Ok(decompressed);
             }
         }
     }
-    let bf_keys: [&[u8; 8]; 2] = [
-        &[0x59, 0x3B, 0x5D, 0x2C, 0x47, 0x74, 0x3D, 0x31],
-        b"Lineage2",
-    ];
-    let aligned_len = payload.len() - (payload.len() % 8);
-    if aligned_len >= 8 {
-        let aligned_payload = &payload[..aligned_len];
-        for bf_key in bf_keys {
-            if let Ok(cipher) = blowfish::Blowfish::<byteorder::BE>::new_from_slice(bf_key) {
-                let mut decrypted = aligned_payload.to_vec();
-                for chunk in decrypted.chunks_exact_mut(8) {
-                    let mut block = cipher::Block::<blowfish::Blowfish<byteorder::BE>>::default();
-                    block.copy_from_slice(chunk);
-                    cipher::BlockCipherDecrypt::decrypt_block(&cipher, &mut block);
-                    chunk.copy_from_slice(&block);
-                }
-                if let Some(decompressed) = decompress_413_payload(&decrypted) {
-                    return Ok(decompressed);
-                }
-            }
-        }
+    if let Some(decompressed) =
+        try_blowfish_key(payload, &[0x59, 0x3B, 0x5D, 0x2C, 0x47, 0x74, 0x3D, 0x31])
+    {
+        return Ok(decompressed);
+    }
+    if let Some(decompressed) = try_blowfish_key(payload, obfstr!("Lineage2").as_bytes()) {
+        return Ok(decompressed);
     }
     Err(AppError::DecompressionFailed)
 }
@@ -308,8 +312,6 @@ pub fn encrypt_413(
     let total_size = HEADER_413_FULL.len() + 128 * chunk_count + 20;
     let mut out = vec![0u8; total_size];
     out[..HEADER_413_FULL.len()].copy_from_slice(HEADER_413_FULL);
-    let modulus = BigUint::from_bytes_le(&RSA_MODULUS_KEY1);
-    let d = BigUint::from_bytes_le(&RSA_PRIVATE_EXPONENT_KEY1);
     for (i, chunk) in stream.chunks(124).enumerate() {
         if let Some(cb) = on_progress {
             cb(i + 1, chunk_count);
@@ -324,7 +326,7 @@ pub fn encrypt_413(
             block[4..4 + size].copy_from_slice(chunk);
         }
         block[..4].copy_from_slice(&(size as u32).to_be_bytes());
-        let encrypted = rsa_modpow(&block, &modulus, &d);
+        let encrypted = rsa_modpow(&block, &PRIVATE_MODULUS_KEY1, &PRIVATE_EXPONENT_KEY1);
         out[HEADER_413_FULL.len() + i * 128..HEADER_413_FULL.len() + (i + 1) * 128]
             .copy_from_slice(&encrypted);
     }
@@ -412,7 +414,7 @@ mod tests {
         let bf_key = b"Lineage2";
         let cipher = blowfish::Blowfish::<byteorder::BE>::new_from_slice(bf_key).unwrap();
         let mut encrypted = stream.clone();
-        for chunk in encrypted.chunks_exact_mut(8) {
+        for chunk in encrypted.as_chunks_mut::<8>().0 {
             let mut block = cipher::Block::<blowfish::Blowfish<byteorder::BE>>::default();
             block.copy_from_slice(chunk);
             cipher::BlockCipherEncrypt::encrypt_block(&cipher, &mut block);
