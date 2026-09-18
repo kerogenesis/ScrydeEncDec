@@ -10,10 +10,6 @@
   <a href="https://github.com/kerogenesis/ScrydeEncDec/releases/download/v1.0.0/ScrydeEncDec_v1.0.0.zip"><img src="https://img.shields.io/github/v/release/kerogenesis/ScrydeEncDec"></a>
 </p>
 
-Soo!  
-Scryde [seems to be continuing their fight](https://habr.com/en/articles/1051494/) against a well-known Eblanova company.  
-That's why a little joke was added to the client. Good luck to them (nah) :D
-
 ## Features
 - The app works in the same way as the well-known mxencdec.
 - It also lets you work with folders that have files in them.
