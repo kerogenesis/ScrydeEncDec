@@ -1,6 +1,6 @@
 [package]
 name = "scryde_encdec"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 authors = ["kerogenesys"]
 description = "Scryde Gamekit Data encrypter & decrypter"
