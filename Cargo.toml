@@ -11,7 +11,7 @@ blowfish = "0.10"
 crc32fast = "1"
 cipher = { version = "0.5", features = ["block-padding"] }
 byteorder = "1.5"
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 indicatif = "0.17"
 crossterm = "0.28"
