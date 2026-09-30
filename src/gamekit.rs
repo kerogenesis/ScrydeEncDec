@@ -2,108 +2,113 @@ use camino::Utf8Path;
 use obfstr::obfstr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FormatType {
-    Ver111 = 1,
-    Ver120 = 2,
-    Ver121 = 3,
-    Ver211 = 4,
-    Ver212 = 5,
-    Ver413 = 6,
-    OggSL2SDBM = 9,
+pub enum FileFormat {
+    Ver111,
+    Ver120,
+    Ver121,
+    Ver211,
+    Ver212,
+    Ver413,
+    OggSL2SDBM,
 }
 
-impl std::fmt::Display for FormatType {
+impl std::fmt::Display for FileFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FormatType::Ver111 => write!(f, "Ver111"),
-            FormatType::Ver120 => write!(f, "Ver120"),
-            FormatType::Ver121 => write!(f, "Ver121"),
-            FormatType::Ver211 => write!(f, "Ver211"),
-            FormatType::Ver212 => write!(f, "Ver212"),
-            FormatType::Ver413 => write!(f, "Ver413"),
-            FormatType::OggSL2SDBM => write!(f, "OggSL2SDBM"),
+            FileFormat::Ver111 => write!(f, "Ver111"),
+            FileFormat::Ver120 => write!(f, "Ver120"),
+            FileFormat::Ver121 => write!(f, "Ver121"),
+            FileFormat::Ver211 => write!(f, "Ver211"),
+            FileFormat::Ver212 => write!(f, "Ver212"),
+            FileFormat::Ver413 => write!(f, "Ver413"),
+            FileFormat::OggSL2SDBM => write!(f, "OggSL2SDBM"),
         }
     }
 }
 
-pub const GAMEKIT_HEADER: &[u8; 22] = b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x00";
-pub const HEADER_VER_111: &[u8; 6] = b"1\x001\x001\x00";
-pub const HEADER_VER_120: &[u8; 6] = b"1\x002\x000\x00";
-pub const HEADER_VER_121: &[u8; 6] = b"1\x002\x001\x00";
-pub const HEADER_VER_211: &[u8; 6] = b"2\x001\x001\x00";
-pub const HEADER_VER_212: &[u8; 6] = b"2\x001\x002\x00";
-pub const HEADER_VER_413: &[u8; 6] = b"4\x001\x003\x00";
+pub const HEADER_PREFIX_LEN: usize = 22;
+pub const HEADER_VERSION_LEN: usize = 6;
+pub const HEADER_LEN: usize = HEADER_PREFIX_LEN + HEADER_VERSION_LEN;
+pub const HEADER_OGG_MAGIC: &[u8; 10] = b"OggSL2SDBM";
+/// First 22 bytes of every encrypted file: `GamekitData` in UTF-16LE.
+pub const HEADER_PREFIX: &[u8; HEADER_PREFIX_LEN] =
+    b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x00";
+/// Last 6 bytes of the 28-byte header: version digits (`111`, `120`, …) in UTF-16LE.
+pub const VERSION_SUFFIX_111: &[u8; HEADER_VERSION_LEN] = b"1\x001\x001\x00";
+pub const VERSION_SUFFIX_120: &[u8; HEADER_VERSION_LEN] = b"1\x002\x000\x00";
+pub const VERSION_SUFFIX_121: &[u8; HEADER_VERSION_LEN] = b"1\x002\x001\x00";
+pub const VERSION_SUFFIX_211: &[u8; HEADER_VERSION_LEN] = b"2\x001\x001\x00";
+pub const VERSION_SUFFIX_212: &[u8; HEADER_VERSION_LEN] = b"2\x001\x002\x00";
+pub const VERSION_SUFFIX_413: &[u8; HEADER_VERSION_LEN] = b"4\x001\x003\x00";
 
-const fn full_header(ver: &[u8; 6]) -> [u8; 28] {
-    let mut out = [0u8; 28];
+const fn full_header(version: &[u8; HEADER_VERSION_LEN]) -> [u8; HEADER_LEN] {
+    let mut out = [0u8; HEADER_LEN];
     let mut i = 0;
-    while i < GAMEKIT_HEADER.len() {
-        out[i] = GAMEKIT_HEADER[i];
+    while i < HEADER_PREFIX.len() {
+        out[i] = HEADER_PREFIX[i];
         i += 1;
     }
     let mut j = 0;
-    while j < ver.len() {
-        out[22 + j] = ver[j];
+    while j < version.len() {
+        out[HEADER_PREFIX_LEN + j] = version[j];
         j += 1;
     }
     out
 }
 
-pub const HEADER_111_FULL: &[u8; 28] = &full_header(HEADER_VER_111);
-pub const HEADER_120_FULL: &[u8; 28] = &full_header(HEADER_VER_120);
-pub const HEADER_121_FULL: &[u8; 28] = &full_header(HEADER_VER_121);
-pub const HEADER_211_FULL: &[u8; 28] = &full_header(HEADER_VER_211);
-pub const HEADER_212_FULL: &[u8; 28] = &full_header(HEADER_VER_212);
-pub const HEADER_413_FULL: &[u8; 28] = &full_header(HEADER_VER_413);
+pub const HEADER_111: &[u8; HEADER_LEN] = &full_header(VERSION_SUFFIX_111);
+pub const HEADER_120: &[u8; HEADER_LEN] = &full_header(VERSION_SUFFIX_120);
+pub const HEADER_121: &[u8; HEADER_LEN] = &full_header(VERSION_SUFFIX_121);
+pub const HEADER_211: &[u8; HEADER_LEN] = &full_header(VERSION_SUFFIX_211);
+pub const HEADER_212: &[u8; HEADER_LEN] = &full_header(VERSION_SUFFIX_212);
+pub const HEADER_413: &[u8; HEADER_LEN] = &full_header(VERSION_SUFFIX_413);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum FileState {
-    Encrypted(FormatType),
+    Encrypted(FileFormat),
     Plaintext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
-    Encrypted,
-    Decrypted,
+    Encrypt,
+    Decrypt,
 }
 
 impl std::fmt::Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Operation::Encrypted => write!(f, "{}", obfstr!("Encrypted")),
-            Operation::Decrypted => write!(f, "{}", obfstr!("Decrypted")),
+            Operation::Encrypt => write!(f, "{}", obfstr!("Encrypted")),
+            Operation::Decrypt => write!(f, "{}", obfstr!("Decrypted")),
         }
     }
 }
 
+const VERSION_TABLE: [(&[u8; HEADER_VERSION_LEN], FileFormat); 6] = [
+    (VERSION_SUFFIX_111, FileFormat::Ver111),
+    (VERSION_SUFFIX_120, FileFormat::Ver120),
+    (VERSION_SUFFIX_121, FileFormat::Ver121),
+    (VERSION_SUFFIX_211, FileFormat::Ver211),
+    (VERSION_SUFFIX_212, FileFormat::Ver212),
+    (VERSION_SUFFIX_413, FileFormat::Ver413),
+];
+
 pub fn detect_file_state(data: &[u8]) -> FileState {
-    if data.len() < 28 {
+    if data.len() < HEADER_LEN {
         return FileState::Plaintext;
     }
-    if data.starts_with(b"OggSL2SDBM") {
-        return FileState::Encrypted(FormatType::OggSL2SDBM);
+    if data.starts_with(HEADER_OGG_MAGIC) {
+        return FileState::Encrypted(FileFormat::OggSL2SDBM);
     }
-    if &data[0..22] == GAMEKIT_HEADER {
-        let sub_ver = &data[22..28];
-        if sub_ver == HEADER_VER_111 {
-            FileState::Encrypted(FormatType::Ver111)
-        } else if sub_ver == HEADER_VER_120 {
-            FileState::Encrypted(FormatType::Ver120)
-        } else if sub_ver == HEADER_VER_121 {
-            FileState::Encrypted(FormatType::Ver121)
-        } else if sub_ver == HEADER_VER_211 {
-            FileState::Encrypted(FormatType::Ver211)
-        } else if sub_ver == HEADER_VER_212 {
-            FileState::Encrypted(FormatType::Ver212)
-        } else if sub_ver == HEADER_VER_413 {
-            FileState::Encrypted(FormatType::Ver413)
-        } else {
-            FileState::Plaintext
-        }
-    } else {
-        FileState::Plaintext
+    if &data[..HEADER_PREFIX_LEN] != HEADER_PREFIX {
+        return FileState::Plaintext;
     }
+    let version = &data[HEADER_PREFIX_LEN..HEADER_LEN];
+    VERSION_TABLE
+        .iter()
+        .find(|(suffix, _)| suffix.as_slice() == version)
+        .map(|(_, file_format)| FileState::Encrypted(*file_format))
+        .unwrap_or(FileState::Plaintext)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,73 +117,60 @@ pub enum FileCategory {
     Package, // uax, unr, uix, ukx, usx, usk, u  (encrypted as Ver120)
     Data,    // dat, l2.ini, user.ini  (encrypted as Ver413)
     Text,    // htm, int, interface.xdat, ttfontinfo.ini, localization.ini  (encrypted as Ver111)
-    Other,
+    Unknown,
 }
 
 impl FileCategory {
-    pub fn default_format(&self) -> FormatType {
+    pub fn default_format(&self) -> FileFormat {
         match self {
-            FileCategory::Texture => FormatType::Ver121,
-            FileCategory::Package => FormatType::Ver120,
-            FileCategory::Data => FormatType::Ver413,
-            FileCategory::Text => FormatType::Ver111,
-            FileCategory::Other => FormatType::Ver413,
+            FileCategory::Texture => FileFormat::Ver121,
+            FileCategory::Package => FileFormat::Ver120,
+            FileCategory::Data => FileFormat::Ver413,
+            FileCategory::Text => FileFormat::Ver111,
+            FileCategory::Unknown => FileFormat::Ver413,
         }
     }
 }
 
 pub fn classify_file(filename: &str) -> FileCategory {
-    let filename_lower = filename.to_lowercase();
+    let filename_lower = filename.to_ascii_lowercase();
     let ext = Utf8Path::new(&filename_lower).extension().unwrap_or("");
     match ext {
-        s if s == obfstr!("utx") || s == obfstr!("ugx") || s == obfstr!("bmp") => {
-            FileCategory::Texture
-        }
-        s if s == obfstr!("uax")
-            || s == obfstr!("unr")
-            || s == obfstr!("uix")
-            || s == obfstr!("ukx")
-            || s == obfstr!("usx")
-            || s == obfstr!("usk")
-            || s == obfstr!("u") =>
-        {
-            FileCategory::Package
-        }
-        s if s == obfstr!("dat") => FileCategory::Data,
-        s if s == obfstr!("ini")
-            && (filename_lower.starts_with(obfstr!("l2"))
-                || filename_lower.starts_with(obfstr!("user"))) =>
+        "utx" | "ugx" | "bmp" => FileCategory::Texture,
+        "uax" | "unr" | "uix" | "ukx" | "usx" | "usk" | "u" => FileCategory::Package,
+        "dat" => FileCategory::Data,
+        "ini"
+            if filename_lower.starts_with(obfstr!("l2"))
+                || filename_lower.starts_with(obfstr!("user")) =>
         {
             FileCategory::Data
         }
-        s if s == obfstr!("htm") || s == obfstr!("int") => FileCategory::Text,
-        s if s == obfstr!("xdat") && filename_lower.starts_with(obfstr!("interface")) => {
-            FileCategory::Text
-        }
-        s if s == obfstr!("ini")
-            && (filename_lower.starts_with(obfstr!("ttfontinfo"))
-                || filename_lower.starts_with(obfstr!("localization"))) =>
+        "htm" | "int" => FileCategory::Text,
+        "xdat" if filename_lower.starts_with(obfstr!("interface")) => FileCategory::Text,
+        "ini"
+            if filename_lower.starts_with(obfstr!("ttfontinfo"))
+                || filename_lower.starts_with(obfstr!("localization")) =>
         {
             FileCategory::Text
         }
-        _ => FileCategory::Other,
+        _ => FileCategory::Unknown,
     }
 }
 
-pub fn version_hint_from_filename(filename: &str) -> Option<FormatType> {
-    let lower = filename.to_lowercase();
+pub fn format_override_from_filename(filename: &str) -> Option<FileFormat> {
+    let lower = filename.to_ascii_lowercase();
     if lower.contains(obfstr!(".v111")) {
-        Some(FormatType::Ver111)
+        Some(FileFormat::Ver111)
     } else if lower.contains(obfstr!(".v120")) {
-        Some(FormatType::Ver120)
+        Some(FileFormat::Ver120)
     } else if lower.contains(obfstr!(".v121")) {
-        Some(FormatType::Ver121)
+        Some(FileFormat::Ver121)
     } else if lower.contains(obfstr!(".v211")) {
-        Some(FormatType::Ver211)
+        Some(FileFormat::Ver211)
     } else if lower.contains(obfstr!(".v212")) {
-        Some(FormatType::Ver212)
+        Some(FileFormat::Ver212)
     } else if lower.contains(obfstr!(".v413")) {
-        Some(FormatType::Ver413)
+        Some(FileFormat::Ver413)
     } else {
         None
     }
@@ -188,9 +180,9 @@ pub fn version_hint_from_filename(filename: &str) -> Option<FormatType> {
 mod tests {
     use super::*;
 
-    fn header_data(ver: &[u8; 6]) -> Vec<u8> {
-        let mut data = GAMEKIT_HEADER.to_vec();
-        data.extend_from_slice(ver);
+    fn header_data(version: &[u8; HEADER_VERSION_LEN]) -> Vec<u8> {
+        let mut data = HEADER_PREFIX.to_vec();
+        data.extend_from_slice(version);
         data.extend_from_slice(&[0u8; 100]);
         data
     }
@@ -198,16 +190,16 @@ mod tests {
     #[test]
     fn detects_all_encrypted_versions() {
         let cases = [
-            (HEADER_VER_111, FormatType::Ver111),
-            (HEADER_VER_120, FormatType::Ver120),
-            (HEADER_VER_121, FormatType::Ver121),
-            (HEADER_VER_211, FormatType::Ver211),
-            (HEADER_VER_212, FormatType::Ver212),
-            (HEADER_VER_413, FormatType::Ver413),
+            (VERSION_SUFFIX_111, FileFormat::Ver111),
+            (VERSION_SUFFIX_120, FileFormat::Ver120),
+            (VERSION_SUFFIX_121, FileFormat::Ver121),
+            (VERSION_SUFFIX_211, FileFormat::Ver211),
+            (VERSION_SUFFIX_212, FileFormat::Ver212),
+            (VERSION_SUFFIX_413, FileFormat::Ver413),
         ];
-        for (ver, expected) in cases {
+        for (version, expected) in cases {
             assert_eq!(
-                detect_file_state(&header_data(ver)),
+                detect_file_state(&header_data(version)),
                 FileState::Encrypted(expected)
             );
         }
@@ -226,35 +218,35 @@ mod tests {
 
     #[test]
     fn detects_ogg_header() {
-        let mut data = b"OggSL2SDBM".to_vec();
+        let mut data = HEADER_OGG_MAGIC.to_vec();
         data.extend_from_slice(&[0u8; 32]);
         assert_eq!(
             detect_file_state(&data),
-            FileState::Encrypted(FormatType::OggSL2SDBM)
+            FileState::Encrypted(FileFormat::OggSL2SDBM)
         );
     }
 
     #[test]
     fn full_headers_match_gamekit_prefix_and_version() {
         let cases = [
-            (HEADER_111_FULL, HEADER_VER_111),
-            (HEADER_120_FULL, HEADER_VER_120),
-            (HEADER_121_FULL, HEADER_VER_121),
-            (HEADER_211_FULL, HEADER_VER_211),
-            (HEADER_212_FULL, HEADER_VER_212),
-            (HEADER_413_FULL, HEADER_VER_413),
+            (HEADER_111, VERSION_SUFFIX_111),
+            (HEADER_120, VERSION_SUFFIX_120),
+            (HEADER_121, VERSION_SUFFIX_121),
+            (HEADER_211, VERSION_SUFFIX_211),
+            (HEADER_212, VERSION_SUFFIX_212),
+            (HEADER_413, VERSION_SUFFIX_413),
         ];
-        for (full, ver) in cases {
-            assert_eq!(full.len(), 28);
-            assert_eq!(&full[..22], GAMEKIT_HEADER);
-            assert_eq!(&full[22..], ver);
+        for (full, version) in cases {
+            assert_eq!(full.len(), HEADER_LEN);
+            assert_eq!(&full[..HEADER_PREFIX_LEN], HEADER_PREFIX);
+            assert_eq!(&full[HEADER_PREFIX_LEN..], version);
         }
     }
 
     #[test]
     fn full_header_111_matches_known_bytes() {
         assert_eq!(
-            HEADER_111_FULL,
+            HEADER_111,
             b"G\x00a\x00m\x00e\x00k\x00i\x00t\x00D\x00a\x00t\x00a\x001\x001\x001\x00"
         );
     }
@@ -288,53 +280,53 @@ mod tests {
     }
 
     #[test]
-    fn classifies_unknown_as_other() {
+    fn classifies_unknown_extensions() {
         for name in ["readme.md", "tool.exe", "archive.zip", "noext"] {
-            assert_eq!(classify_file(name), FileCategory::Other, "{name}");
+            assert_eq!(classify_file(name), FileCategory::Unknown, "{name}");
         }
     }
 
     #[test]
-    fn version_hint_from_filename_markers() {
+    fn format_override_from_filename_markers() {
         assert_eq!(
-            version_hint_from_filename("table.v111.dat"),
-            Some(FormatType::Ver111)
+            format_override_from_filename("table.v111.dat"),
+            Some(FileFormat::Ver111)
         );
         assert_eq!(
-            version_hint_from_filename("table.v120.dat"),
-            Some(FormatType::Ver120)
+            format_override_from_filename("table.v120.dat"),
+            Some(FileFormat::Ver120)
         );
         assert_eq!(
-            version_hint_from_filename("table.v121.dat"),
-            Some(FormatType::Ver121)
+            format_override_from_filename("table.v121.dat"),
+            Some(FileFormat::Ver121)
         );
         assert_eq!(
-            version_hint_from_filename("table.v211.dat"),
-            Some(FormatType::Ver211)
+            format_override_from_filename("table.v211.dat"),
+            Some(FileFormat::Ver211)
         );
         assert_eq!(
-            version_hint_from_filename("table.v212.dat"),
-            Some(FormatType::Ver212)
+            format_override_from_filename("table.v212.dat"),
+            Some(FileFormat::Ver212)
         );
         assert_eq!(
-            version_hint_from_filename("table.v413.dat"),
-            Some(FormatType::Ver413)
+            format_override_from_filename("table.v413.dat"),
+            Some(FileFormat::Ver413)
         );
-        assert_eq!(version_hint_from_filename("plain.dat"), None);
+        assert_eq!(format_override_from_filename("plain.dat"), None);
     }
 
     #[test]
     fn default_format_mapping() {
-        assert_eq!(FileCategory::Texture.default_format(), FormatType::Ver121);
-        assert_eq!(FileCategory::Package.default_format(), FormatType::Ver120);
-        assert_eq!(FileCategory::Data.default_format(), FormatType::Ver413);
-        assert_eq!(FileCategory::Text.default_format(), FormatType::Ver111);
-        assert_eq!(FileCategory::Other.default_format(), FormatType::Ver413);
+        assert_eq!(FileCategory::Texture.default_format(), FileFormat::Ver121);
+        assert_eq!(FileCategory::Package.default_format(), FileFormat::Ver120);
+        assert_eq!(FileCategory::Data.default_format(), FileFormat::Ver413);
+        assert_eq!(FileCategory::Text.default_format(), FileFormat::Ver111);
+        assert_eq!(FileCategory::Unknown.default_format(), FileFormat::Ver413);
     }
 
     #[test]
     fn operation_display_names() {
-        assert_eq!(Operation::Encrypted.to_string(), "Encrypted");
-        assert_eq!(Operation::Decrypted.to_string(), "Decrypted");
+        assert_eq!(Operation::Encrypt.to_string(), "Encrypted");
+        assert_eq!(Operation::Decrypt.to_string(), "Decrypted");
     }
 }

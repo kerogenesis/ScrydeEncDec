@@ -2,21 +2,19 @@
 name = "scryde_encdec"
 version = "1.0.2"
 edition = "2024"
-authors = ["kerogenesys"]
+authors = ["kerogenesis"]
 description = "Scryde Gamekit Data encrypter & decrypter"
 
 [dependencies]
 flate2 = { version = "1.1", features = ["zlib"] }
 blowfish = "0.10"
 crc32fast = "1"
-cipher = { version = "0.5", features = ["block-padding"] }
+cipher = "0.5"
 byteorder = "1.5"
 num-bigint = "0.5"
-num-traits = "0.2"
 indicatif = "0.18"
 crossterm = "0.29"
 rayon = "1.10"
-thiserror = "2"
 walkdir = "2"
 camino = "1"
 obfstr = "0.4"

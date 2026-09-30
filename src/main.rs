@@ -4,10 +4,13 @@ mod gamekit;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::execute;
 use crossterm::style::Stylize;
+use crossterm::terminal::SetTitle;
 use error::Result;
 use gamekit::{
-    FileState, FormatType, Operation, classify_file, detect_file_state, version_hint_from_filename,
+    FileFormat, FileState, HEADER_LEN, Operation, classify_file, detect_file_state,
+    format_override_from_filename,
 };
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use obfstr::obfstr;
@@ -20,7 +23,7 @@ use std::sync::mpsc::{Receiver, channel};
 use walkdir::WalkDir;
 
 struct ProcessResult {
-    format: FormatType,
+    format: FileFormat,
     operation: Operation,
 }
 
@@ -29,32 +32,20 @@ fn strip_tool_prefix(name: &str) -> &str {
     name.strip_prefix(obfstr!("dec.")).unwrap_or(name)
 }
 
-fn decrypt_payload(format: FormatType, payload: &[u8], filename: &str) -> Result<Vec<u8>> {
+fn encrypt_payload(format: FileFormat, data: &[u8], filename: &str) -> Result<Vec<u8>> {
     match format {
-        FormatType::Ver111 => Ok(crypto::decrypt_111(payload, None)),
-        FormatType::Ver120 => Ok(crypto::decrypt_120(payload, None)),
-        FormatType::Ver121 => Ok(crypto::decrypt_121(payload, filename, None)),
-        FormatType::Ver211 => Ok(crypto::decrypt_211(payload, None)),
-        FormatType::Ver212 => Ok(crypto::decrypt_212(payload, None)),
-        FormatType::Ver413 => crypto::decrypt_413(payload, None),
-        FormatType::OggSL2SDBM => Ok(payload.to_vec()),
-    }
-}
-
-fn encrypt_payload(format: FormatType, data: &[u8], filename: &str) -> Result<Vec<u8>> {
-    match format {
-        FormatType::Ver111 => Ok(crypto::encrypt_111(data, None)),
-        FormatType::Ver120 => Ok(crypto::encrypt_120(data, None)),
-        FormatType::Ver121 => Ok(crypto::encrypt_121(data, filename, None)),
-        FormatType::Ver211 => Ok(crypto::encrypt_211(data, None)),
-        FormatType::Ver212 => Ok(crypto::encrypt_212(data, None)),
-        FormatType::Ver413 => crypto::encrypt_413(data, None),
-        FormatType::OggSL2SDBM => Err(error::AppError::InvalidHeader),
+        FileFormat::Ver111 => Ok(crypto::encrypt_111(data)),
+        FileFormat::Ver120 => Ok(crypto::encrypt_120(data)),
+        FileFormat::Ver121 => Ok(crypto::encrypt_121(data, filename)),
+        FileFormat::Ver211 => Ok(crypto::encrypt_211(data)),
+        FileFormat::Ver212 => Ok(crypto::encrypt_212(data)),
+        FileFormat::Ver413 => crypto::encrypt_413(data),
+        FileFormat::OggSL2SDBM => Err(error::AppError::InvalidHeader),
     }
 }
 
 fn process_file(file_path: &Utf8Path) -> Result<ProcessResult> {
-    let data = fs::read(file_path)?;
+    let mut data = fs::read(file_path)?;
     if data.is_empty() {
         return Err(error::AppError::InvalidHeader);
     }
@@ -64,22 +55,50 @@ fn process_file(file_path: &Utf8Path) -> Result<ProcessResult> {
 
     match state {
         FileState::Encrypted(format) => {
-            let decrypted = decrypt_payload(format, &data[28..], filename)?;
-            fs::write(file_path, decrypted)?;
+            match format {
+                FileFormat::Ver111 => {
+                    crypto::xor_111_mut(&mut data[HEADER_LEN..]);
+                    fs::write(file_path, &data[HEADER_LEN..])?;
+                }
+                FileFormat::Ver120 => {
+                    crypto::xor_120_mut(&mut data[HEADER_LEN..]);
+                    fs::write(file_path, &data[HEADER_LEN..])?;
+                }
+                FileFormat::Ver121 => {
+                    let key = crypto::resolve_121_key(&data[HEADER_LEN..], filename);
+                    crypto::xor_121_mut(&mut data[HEADER_LEN..], key);
+                    fs::write(file_path, &data[HEADER_LEN..])?;
+                }
+                FileFormat::Ver211 => {
+                    crypto::xor_repeating_8byte_mut(&mut data[HEADER_LEN..], crypto::XOR_KEY_211);
+                    fs::write(file_path, &data[HEADER_LEN..])?;
+                }
+                FileFormat::Ver212 => {
+                    crypto::xor_repeating_8byte_mut(&mut data[HEADER_LEN..], crypto::XOR_KEY_212);
+                    fs::write(file_path, &data[HEADER_LEN..])?;
+                }
+                FileFormat::Ver413 => {
+                    let decrypted = crypto::decrypt_413(&data[HEADER_LEN..])?;
+                    fs::write(file_path, decrypted)?;
+                }
+                FileFormat::OggSL2SDBM => {
+                    fs::write(file_path, &data[HEADER_LEN..])?;
+                }
+            }
             Ok(ProcessResult {
                 format,
-                operation: Operation::Decrypted,
+                operation: Operation::Decrypt,
             })
         }
         FileState::Plaintext => {
             let category = classify_file(filename);
-            let format =
-                version_hint_from_filename(filename).unwrap_or_else(|| category.default_format());
+            let format = format_override_from_filename(filename)
+                .unwrap_or_else(|| category.default_format());
             let encrypted = encrypt_payload(format, &data, filename)?;
             fs::write(file_path, encrypted)?;
             Ok(ProcessResult {
                 format,
-                operation: Operation::Encrypted,
+                operation: Operation::Encrypt,
             })
         }
     }
@@ -201,6 +220,7 @@ fn report_in_input_order(
 }
 
 fn main() {
+    let _ = execute!(io::stdout(), SetTitle(obfstr!("ScrydeEncDec")));
     print_banner();
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -287,12 +307,12 @@ mod tests {
         std::fs::write(&path, &plain).unwrap();
 
         let step1 = process_file(&path).unwrap();
-        assert_eq!(step1.operation, Operation::Encrypted);
-        assert_eq!(step1.format, FormatType::Ver413);
+        assert_eq!(step1.operation, Operation::Encrypt);
+        assert_eq!(step1.format, FileFormat::Ver413);
 
         let step2 = process_file(&path).unwrap();
-        assert_eq!(step2.operation, Operation::Decrypted);
-        assert_eq!(step2.format, FormatType::Ver413);
+        assert_eq!(step2.operation, Operation::Decrypt);
+        assert_eq!(step2.format, FileFormat::Ver413);
         assert_eq!(std::fs::read(&path).unwrap(), plain);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -306,12 +326,12 @@ mod tests {
         std::fs::write(&path, &plain).unwrap();
 
         let step1 = process_file(&path).unwrap();
-        assert_eq!(step1.operation, Operation::Encrypted);
-        assert_eq!(step1.format, FormatType::Ver121);
+        assert_eq!(step1.operation, Operation::Encrypt);
+        assert_eq!(step1.format, FileFormat::Ver121);
 
         let step2 = process_file(&path).unwrap();
-        assert_eq!(step2.operation, Operation::Decrypted);
-        assert_eq!(step2.format, FormatType::Ver121);
+        assert_eq!(step2.operation, Operation::Decrypt);
+        assert_eq!(step2.format, FileFormat::Ver121);
         assert_eq!(std::fs::read(&path).unwrap(), plain);
 
         let _ = std::fs::remove_dir_all(&dir);
